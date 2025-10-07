@@ -2,124 +2,118 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Bill of Lading vs Export Declaration Comparison</title>
+  <title>BOL & Export Declaration Compare</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
   <style>
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin-top: 20px;
-    }
-    th, td {
-      border: 1px solid #ccc;
-      padding: 8px;
-      text-align: left;
-    }
-    th {
-      background-color: #f1f1f1;
-    }
-    .same { background-color: #d4edda; }
-    .not-same { background-color: #f8d7da; }
-    .approx { background-color: #fff3cd; }
-    .not-found { background-color: #e2e3e5; }
+    body { font-family: sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; }
+    th { background: #f7f7f7; }
+    .same { background: #d4edda; }
+    .not-same { background: #f8d7da; }
+    .approx { background: #fff3cd; }
+    .not-found { background: #e2e3e5; }
   </style>
 </head>
 <body>
-<h2>Bill of Lading vs Export Declaration</h2>
-<table>
-  <thead>
-    <tr>
+<h2>Upload Bill of Lading and Export Declaration PDFs</h2>
+<input type="file" id="bolFile" accept="application/pdf">
+<input type="file" id="expFile" accept="application/pdf">
+<button onclick="compareDocs()">Compare</button>
+
+<div id="output"></div>
+
+<script>
+let pdfjsLib = window['pdfjs-dist/build/pdf'];
+
+async function extractTextFromPDF(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const txt = await page.getTextContent();
+    fullText += txt.items.map(item => item.str).join(' ') + "\n";
+  }
+  return fullText;
+}
+
+// Dummy field extractors: Adjust regex and logic based on your real PDFs!
+function extractFields(text) {
+  return {
+    exporter: /Exporter.*?:\s*([^\n]+)/i.exec(text)?.[1] || "",
+    consignee: /Consignee.*?:\s*([^\n]+)/i.exec(text)?.[1] || "",
+    docNum: /Document Number.*?:\s*([^\n]+)/i.exec(text)?.[1] || /No(?:\.|:)?\s*(\d+)/i.exec(text)?.[1] || "",
+    dest: /Destination.*?:\s*([^\n]+)/i.exec(text)?.[1] || "",
+    vessel: /Vessel.*?:\s*([^\n]+)/i.exec(text)?.[1] || "",
+    container: /(CNT|Container).*?:\s*([^\n]+)/i.exec(text)?.[2] || "",
+    weight: /Weight.*?:\s*([^\n]+)/i.exec(text)?.[1] || /Gross weight.*?(\d+[\.,]?\d*)\s*Kg/i.exec(text)?.[1] || "",
+    transit: /TRANSIT.*?([^\n]+)/i.exec(text)?.[1] || "",
+    ectn: /ECTN.*?:\s*([^\n]+)/i.exec(text)?.[1] || "",
+    cers: /CERS.*?:\s*([^\n]+)/i.exec(text)?.[1] || "",
+    models: /(?:Model|Car Model|Description).*?:\s*([^\n]+)/i.exec(text)?.[1] || "",
+    vins: /VIN.*?:?\s*([\w\d\s,]+)/i.exec(text)?.[1] || "",
+  };
+}
+
+function compare(a, b) {
+  if (!a && !b) return ['not-found', 'Not found'];
+  if (a.trim() === b.trim()) return ['same', 'Same'];
+  if (!a || !b) return ['not-found', 'Not found'];
+  if (a.trim().toLowerCase() === b.trim().toLowerCase()) return ['same', 'Same'];
+  if (a && b && (a.includes(b) || b.includes(a))) return ['approx', 'Approximately'];
+  return ['not-same', 'Not the same'];
+}
+
+async function compareDocs() {
+  const bolFile = document.getElementById('bolFile').files[0];
+  const expFile = document.getElementById('expFile').files[0];
+  if (!bolFile || !expFile) {
+    alert('Please upload both PDFs.');
+    return;
+  }
+  document.getElementById('output').innerText = 'Extracting...';
+
+  const bolText = await extractTextFromPDF(bolFile);
+  const expText = await extractTextFromPDF(expFile);
+
+  const fields = [
+    { label: 'Exporter Name', key: 'exporter' },
+    { label: 'Consignee', key: 'consignee' },
+    { label: 'Document Number', key: 'docNum' },
+    { label: 'Destination', key: 'dest' },
+    { label: 'Vessel', key: 'vessel' },
+    { label: 'Container Number', key: 'container' },
+    { label: 'Total Weight', key: 'weight' },
+    { label: 'Transit Information', key: 'transit' },
+    { label: 'ECTN Number', key: 'ectn' },
+    { label: 'CERS Number', key: 'cers' },
+    { label: 'Car Models', key: 'models' },
+    { label: 'VINs for Cars', key: 'vins' },
+  ];
+
+  const bolFields = extractFields(bolText);
+  const expFields = extractFields(expText);
+
+  let table = `<table><thead><tr>
       <th>Field</th>
       <th>Bill of Lading</th>
       <th>Export Declaration</th>
-      <th>Comparison Result</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Exporter Name</td>
-      <td id="bol-exporter">9288-5755 QUEBEC INC (Auto Adam)</td>
-      <td id="exp-exporter"></td>
-      <td id="cmp-exporter"></td>
-    </tr>
-    <tr>
-      <td>Consignee</td>
-      <td id="bol-consignee">EAGLE, Cotonou, Benin</td>
-      <td id="exp-consignee"></td>
-      <td id="cmp-consignee"></td>
-    </tr>
-    <tr>
-      <td>Document Number</td>
-      <td id="bol-doc-number">14231666</td>
-      <td id="exp-doc-number"></td>
-      <td id="cmp-doc-number"></td>
-    </tr>
-    <tr>
-      <td>Destination</td>
-      <td id="bol-dest">Cotonou</td>
-      <td id="exp-dest"></td>
-      <td id="cmp-dest"></td>
-    </tr>
-    <tr>
-      <td>Vessel</td>
-      <td id="bol-vessel">Hapag-Lloyd</td>
-      <td id="exp-vessel"></td>
-      <td id="cmp-vessel"></td>
-    </tr>
-    <tr>
-      <td>Container Number</td>
-      <td id="bol-container">FANU1234062</td>
-      <td id="exp-container"></td>
-      <td id="cmp-container"></td>
-    </tr>
-    <tr>
-      <td>Total Weight</td>
-      <td id="bol-weight">6,361.18 Kg</td>
-      <td id="exp-weight"></td>
-      <td id="cmp-weight"></td>
-    </tr>
-    <tr>
-      <td>Transit Information</td>
-      <td id="bol-transit">IN TRANSIT TO BURKINA FASO AT CONSIGNEE COST</td>
-      <td id="exp-transit"></td>
-      <td id="cmp-transit"></td>
-    </tr>
-    <tr>
-      <td>ECTN Number</td>
-      <td id="bol-ectn">BJ2505212E</td>
-      <td id="exp-ectn"></td>
-      <td id="cmp-ectn"></td>
-    </tr>
-    <tr>
-      <td>CERS Number</td>
-      <td id="bol-cers">AC7966202510074732831</td>
-      <td id="exp-cers"></td>
-      <td id="cmp-cers"></td>
-    </tr>
-    <tr>
-      <td>Car Models</td>
-      <td id="bol-models">
-        2009 TOYOTA YARIS, 2010 TOYOTA YARIS, 2010 TOYOTA MATRIX, 2013 MERCEDES-BENZ C250
-      </td>
-      <td id="exp-models"></td>
-      <td id="cmp-models"></td>
-    </tr>
-    <tr>
-      <td>Car VINs</td>
-      <td id="bol-vins">
-        JTDBT9239A1997779, JTDBT903952378366, 2T1KU4EE4DC429119, WDDGF4HB3DF934518
-      </td>
-      <td id="exp-vins"></td>
-      <td id="cmp-vins"></td>
-    </tr>
-  </tbody>
-</table>
-<script>
-  // Example for manually comparing and filling "same", "not the same", etc.
-  // Assume you fill Export Declaration data manually
-  document.getElementById('exp-exporter').innerText = '9288-5755 QUEBEC INC (Auto Adam)';
-  document.getElementById('cmp-exporter').innerText = 'same';
-  document.getElementById('cmp-exporter').className = 'same';
-  // Repeat above for all fields based on your Export Declaration data and comparison logic
+      <th>Result</th>
+      </tr></thead><tbody>`;
+
+  fields.forEach(f => {
+    let [cls, txt] = compare(bolFields[f.key], expFields[f.key]);
+    table += `<tr>
+        <td>${f.label}</td>
+        <td>${bolFields[f.key] || ''}</td>
+        <td>${expFields[f.key] || ''}</td>
+        <td class="${cls}">${txt}</td>
+      </tr>`;
+  });
+  table += `</tbody></table>`;
+  document.getElementById('output').innerHTML = table;
+}
 </script>
 </body>
 </html>
