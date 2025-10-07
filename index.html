@@ -2,17 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Compare 2 PDF Files</title>
+<title>Compare 2 PDF Files (Bill of Lading)</title>
 <style>
-  body { font-family: Arial; margin: 30px; }
+  body { font-family: Arial, sans-serif; margin: 30px; background: #fafafa; }
+  h2 { color: #333; }
   input { margin: 10px 0; }
-  #result { margin-top: 20px; font-weight: bold; }
-  pre { background: #f3f3f3; padding: 10px; border: 1px solid #ccc; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+  th { background: #f0f0f0; }
+  .same { color: green; font-weight: bold; }
+  .diff { color: red; font-weight: bold; }
 </style>
 </head>
 <body>
 
-<h2>Compare Two PDF Files</h2>
+<h2>Compare Two PDF Files (Bill of Lading)</h2>
 
 <label>Upload first PDF:</label><br>
 <input type="file" id="pdf1" accept="application/pdf"><br>
@@ -27,7 +31,7 @@
 <script>
 async function extractText(file) {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   let text = "";
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
@@ -38,27 +42,88 @@ async function extractText(file) {
   return text;
 }
 
+function extractField(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return match[1].trim();
+  }
+  return "";
+}
+
+function compareValues(label, v1, v2) {
+  const same = v1 && v2 && v1.toLowerCase() === v2.toLowerCase();
+  return `<tr>
+    <td>${label}</td>
+    <td>${v1 || "-"}</td>
+    <td>${v2 || "-"}</td>
+    <td class="${same ? 'same' : 'diff'}">${same ? '✅ Same' : '❌ Not Same'}</td>
+  </tr>`;
+}
+
 async function comparePDFs() {
   const file1 = document.getElementById("pdf1").files[0];
   const file2 = document.getElementById("pdf2").files[0];
   const resultDiv = document.getElementById("result");
-  
+
   if (!file1 || !file2) {
-    resultDiv.textContent = "Please upload both PDF files.";
+    resultDiv.innerHTML = "<p style='color:red;'>Please upload both PDF files.</p>";
     return;
   }
 
-  resultDiv.textContent = "Reading and comparing files...";
+  resultDiv.innerHTML = "<p>Reading and comparing files...</p>";
 
-  const text1 = await extractText(file1);
-  const text2 = await extractText(file2);
+  const [text1, text2] = await Promise.all([extractText(file1), extractText(file2)]);
 
-  if (text1.trim() === text2.trim()) {
-    resultDiv.innerHTML = "<span style='color:green'>✅ Both PDFs contain the same information.</span>";
-  } else {
-    resultDiv.innerHTML = "<span style='color:red'>❌ PDFs are different.</span><br><br>";
-    resultDiv.innerHTML += "<pre>Differences not identical, check manually.</pre>";
+  // Extract important fields
+  const fields = {
+    "Shipper": [/Inter Export.*?(\d{3,}.*?)(?=American|CIF|$)/i],
+    "Consignee": [/American Auto.*?Togo/i],
+    "Notify Party": [/CIF.*?(?:Laval|Terrebonne).*?(?=\s+[A-Z]{2}|$)/i],
+    "Booking/B.L Number": [/B\/L\s*No\.*[:\s]*([0-9A-Z]+)/i, /Proof of Report.*?([0-9A-Z]+)/i],
+    "Container Number": [/MTSU[0-9]+/i],
+    "Seal Number": [/SEAL[:\s]*([0-9]+)/i],
+    "Destination": [/(Lome|Togo)/i],
+    "Port of Loading": [/(Montreal|Montréal)/i],
+    "Vessel": [/(ARICA EXPRESS.*?19E41)/i],
+    "Gross Weight": /(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i,
+    "VINs": [/(JTDKTUD37CD524304|KM8JCCAE9PU234840|5J8TC2H68LL802650|3KPFU4DE6SE018704)/g],
+    "Date": [/October\s*\d{1,2}\s*,\s*2025/i],
+    "Freight": [/(\d+\s*CAD)/i],
+  };
+
+  let html = `
+    <table>
+      <tr><th>Field</th><th>File 1</th><th>File 2</th><th>Result</th></tr>
+  `;
+
+  for (const [label, pattern] of Object.entries(fields)) {
+    let v1 = Array.isArray(pattern) ? "" : (text1.match(pattern) ? text1.match(pattern)[1] : "");
+    let v2 = Array.isArray(pattern) ? "" : (text2.match(pattern) ? text2.match(pattern)[1] : "");
+
+    if (Array.isArray(pattern)) {
+      for (let p of pattern) {
+        if (!v1) {
+          const m = text1.match(p);
+          if (m) v1 = m[1] || m[0];
+        }
+        if (!v2) {
+          const m = text2.match(p);
+          if (m) v2 = m[1] || m[0];
+        }
+      }
+    }
+
+    // Special case for VINs: show all matches joined
+    if (label === "VINs") {
+      v1 = (text1.match(pattern[0]) || []).join(", ");
+      v2 = (text2.match(pattern[0]) || []).join(", ");
+    }
+
+    html += compareValues(label, v1, v2);
   }
+
+  html += "</table>";
+  resultDiv.innerHTML = html;
 }
 </script>
 </body>
