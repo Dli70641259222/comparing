@@ -58,6 +58,19 @@ function resultMatch(label, refValue, declText) {
   return `<tr><td>${label}</td><td>${refValue}</td><td>${res === '❌ Not Found' ? '-' : 'Found in Export Declaration'}</td><td class='${cls}'>${res}</td></tr>`;
 }
 
+function resultMatchWeight(label, refValue, declText) {
+  if (!refValue) return `<tr><td>${label}</td><td>-</td><td>-</td><td class='diff'>❌ Not Found</td></tr>`;
+  const refNum = parseFloat(refValue.replace(/,/g,''));
+  const numbers = declText.match(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g) || [];
+  let res = '❌ Not Found', cls = 'diff';
+  for(const n of numbers){
+    const num = parseFloat(n.replace(/,/g,''));
+    if(num === refNum){ res='✅ Same'; cls='same'; break; }
+    else if(Math.abs(num - refNum)/refNum < 0.05){ res='⚠️ Approximately'; cls='approx'; break; }
+  }
+  return `<tr><td>${label}</td><td>${refValue}</td><td>${res==='❌ Not Found' ? '-' : 'Found in Export Declaration'}</td><td class='${cls}'>${res}</td></tr>`;
+}
+
 async function comparePDFs() {
   const f1 = document.getElementById("pdf1").files[0];
   const f2 = document.getElementById("pdf2").files[0];
@@ -91,7 +104,7 @@ async function comparePDFs() {
   html += resultMatch("Destination", ref.destination, t2);
   html += resultMatch("Vessel", ref.vessel, t2);
   html += resultMatch("Cars (Models & VINs)", ref.cars, t2);
-  html += resultMatch("Total Gross Weight", ref.gross, t2);
+  html += resultMatchWeight("Total Gross Weight", ref.gross, t2);
   html += "</table>";
 
   const same = (html.match(/✅/g) || []).length;
