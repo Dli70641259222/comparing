@@ -2,22 +2,25 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Compare Bill of Lading & Export Declaration</title>
+<title>Shipping Comparison Tool (BOL vs Export Declaration)</title>
 <style>
   body { font-family: Arial, sans-serif; margin: 30px; background: #fafafa; }
   h2 { color: #333; }
   input { margin: 10px 0; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+  button { padding: 8px 16px; cursor: pointer; margin-top: 10px; background:#005bbb; color:white; border:none; border-radius:4px; }
+  button:hover { background:#004699; }
+  table { width: 100%; border-collapse: collapse; margin-top: 25px; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
   th { background: #f0f0f0; }
   .same { color: green; font-weight: bold; }
   .approx { color: orange; font-weight: bold; }
   .diff { color: red; font-weight: bold; }
+  #summary { margin-top: 15px; font-weight: bold; }
 </style>
 </head>
 <body>
 
-<h2>Compare Bill of Lading and Export Declaration</h2>
+<h2>📦 Compare Bill of Lading and Export Declaration</h2>
 
 <label>Upload Bill of Lading (PDF):</label><br>
 <input type="file" id="pdf1" accept="application/pdf"><br>
@@ -43,7 +46,7 @@ async function extractText(file) {
   return text;
 }
 
-function normalize(t) { return t.replace(/\s+/g, " ").trim().toLowerCase(); }
+function normalize(t) { return t ? t.replace(/\s+/g, " ").trim().toLowerCase() : ""; }
 
 function compareValues(label, v1, v2) {
   const c1 = normalize(v1), c2 = normalize(v2);
@@ -51,36 +54,47 @@ function compareValues(label, v1, v2) {
   if (!v1 && !v2) { result = "❌ Not Found"; cls = "diff"; }
   else if (c1 === c2) { result = "✅ Same"; cls = "same"; }
   else if (c1.includes(c2) || c2.includes(c1)) { result = "⚠️ Approximately"; cls = "approx"; }
-  return `<tr><td>${label}</td><td>${v1}</td><td>${v2}</td><td class="${cls}">${result}</td></tr>`;
+  return `<tr><td>${label}</td><td>${v1 || "-"}</td><td>${v2 || "-"}</td><td class="${cls}">${result}</td></tr>`;
 }
 
 async function comparePDFs() {
   const f1 = document.getElementById("pdf1").files[0];
   const f2 = document.getElementById("pdf2").files[0];
   const res = document.getElementById("result");
-  if (!f1 || !f2) { res.innerHTML = "<p style='color:red;'>Upload both files!</p>"; return; }
-  res.innerHTML = "Extracting and comparing...";
+  if (!f1 || !f2) { res.innerHTML = "<p style='color:red;'>⚠️ Please upload both files first.</p>"; return; }
+
+  res.innerHTML = "<p>⏳ Reading and comparing files...</p>";
+
   const [t1, t2] = await Promise.all([extractText(f1), extractText(f2)]);
 
+  // Patterns (flexible for future shipments)
   const get = (text, re) => (text.match(re) ? text.match(re)[0] : "");
 
   const data = [
-    ["Exporter Name", get(t1, /Inter Export.*?(?=American|CIF)/i), get(t2, /INTER EXPORT INC.*?H9B 2K6/i)],
-    ["Consignee", get(t1, /American Auto.*?Togo/i), get(t2, /American Auto.*?Togo/i)],
-    ["Document Number", get(t1, /38193844/), get(t2, /38193844/)],
-    ["Container Number", get(t1, /MTSU9668201/i), get(t2, /MTSU9668201/i)],
-    ["Destination", get(t1, /Lome|Togo/i), get(t2, /Togo/i)],
-    ["Vessel", get(t1, /ARICA EXPRESS 19E41/i), get(t2, /ARICA EXPRESS 19E41/i)],
+    ["Exporter Name", get(t1, /2\.\s*EXPORTER[\s\S]{0,80}/i), get(t2, /Exporter Name[\s\S]{0,80}/i)],
+    ["Consignee", get(t1, /3\.\s*CONSIGNED TO[\s\S]{0,80}/i), get(t2, /Consignee Name[\s\S]{0,80}/i)],
+    ["Document Number", get(t1, /5\.\s*DOCUMENT NUMBER[\s\S]{0,30}/i), get(t2, /Proof of Report.*?([A-Z0-9]+)/i)],
+    ["Container Number", get(t1, /(CNT[:\s]*[A-Z0-9]+)/i), get(t2, /(Container Number.*?[A-Z0-9]+)/i)],
+    ["Destination", get(t1, /(Lome|Togo)/i), get(t2, /(Country of Final Destination.*?(Lome|Togo))/i)],
+    ["Vessel", get(t1, /(ARICA EXPRESS.*?\d+\w*)/i), get(t2, /(Vessel Name.*?ARICA EXPRESS.*?\d+\w*)/i)],
     ["Cars (Models & VINs)",
-      (t1.match(/(TOYOTA|HYUNDAI|ACURA|KIA).*?VIN:[A-Z0-9]+/gi) || []).join(", "),
-      (t2.match(/(TOYOTA|HYUNDAI|ACURA|KIA).*?[A-Z0-9]{17}/gi) || []).join(", ")
+      (t1.match(/(TOYOTA|HYUNDAI|ACURA|KIA).*?(VIN[:\s]*[A-Z0-9]+)/gi) || []).join("<br>"),
+      (t2.match(/(TOYOTA|HYUNDAI|ACURA|KIA).*?[A-Z0-9]{17}/gi) || []).join("<br>")
     ],
-    ["Total Gross Weight", get(t1, /6,247\.89\s*Kg/i), get(t2, /6247\s*Kilogramme/i)]
+    ["Total Gross Weight", get(t1, /(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i), get(t2, /(\d{3,5,6,7,8,9,0]+)\s*Kilogramme/i)]
   ];
 
-  let html = `<table><tr><th>Field</th><th>Bill of Lading</th><th>Export Declaration</th><th>Result</th></tr>`;
+  // Build HTML result table
+  let html = `<h3>📋 Comparison Results</h3>
+  <table><tr><th>Field</th><th>Bill of Lading</th><th>Export Declaration</th><th>Result</th></tr>`;
   for (const [lbl, a, b] of data) html += compareValues(lbl, a, b);
   html += "</table>";
+
+  const same = (html.match(/✅/g) || []).length;
+  const approx = (html.match(/⚠️/g) || []).length;
+  const diff = (html.match(/❌/g) || []).length;
+  html += `<div id="summary">Summary: ✅ Same = ${same}, ⚠️ Approximately = ${approx}, ❌ Not Same = ${diff}</div>`;
+
   res.innerHTML = html;
 }
 </script>
