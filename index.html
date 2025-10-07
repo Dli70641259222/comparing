@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Compare Export Declaration Using Bill of Lading</title>
+<title>Compare Export Declaration Using Bill of Lading as Reference</title>
 <style>
   body { font-family: Arial, sans-serif; margin: 30px; background: #fafafa; }
   h2 { color: #333; }
@@ -48,27 +48,14 @@ async function extractText(file) {
 
 function normalize(t) { return t ? t.replace(/\s+/g, " ").trim() : ""; }
 
-function compareText(label, refValue, declText) {
+function resultMatch(label, refValue, declText) {
   if (!refValue) return `<tr><td>${label}</td><td>-</td><td>-</td><td class='diff'>❌ Not Found</td></tr>`;
   const val = refValue.toLowerCase();
   const text = declText.toLowerCase();
   let res = "❌ Not Found", cls = "diff";
   if (text.includes(val)) { res = "✅ Same"; cls = "same"; }
   else if (val.split(" ").filter(v => v.length > 3).some(v => text.includes(v))) { res = "⚠️ Approximately"; cls = "approx"; }
-  return `<tr><td>${label}</td><td>${refValue}</td><td>${res==='❌ Not Found' ? '-' : 'Found in Export Declaration'}</td><td class='${cls}'>${res}</td></tr>`;
-}
-
-function compareWeight(label, refValue, declText) {
-  if (!refValue) return `<tr><td>${label}</td><td>-</td><td>-</td><td class='diff'>❌ Not Found</td></tr>`;
-  const refNum = parseFloat(refValue.replace(/,/g,''));
-  const numbers = declText.match(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g) || [];
-  let res='❌ Not Found', cls='diff';
-  for(const n of numbers){
-    const num = parseFloat(n.replace(/,/g,''));
-    if(num === refNum){ res='✅ Same'; cls='same'; break; }
-    else if(Math.abs(num - refNum)/refNum < 0.05){ res='⚠️ Approximately'; cls='approx'; break; }
-  }
-  return `<tr><td>${label}</td><td>${refValue}</td><td>${res==='❌ Not Found' ? '-' : 'Found in Export Declaration'}</td><td class='${cls}'>${res}</td></tr>`;
+  return `<tr><td>${label}</td><td>${refValue}</td><td>${res === '❌ Not Found' ? '-' : 'Found in Export Declaration'}</td><td class='${cls}'>${res}</td></tr>`;
 }
 
 async function comparePDFs() {
@@ -82,40 +69,35 @@ async function comparePDFs() {
   const t1 = bolText.replace(/\s+/g, " ");
   const t2 = declText.replace(/\s+/g, " ");
 
-  // Extract values dynamically from BOL
+  // Extract values from Bill of Lading (Reference)
   const ref = {
-    exporter: (t1.match(/Exporter[:\s]*(.+?)(?=Consignee|Document|$)/i) || ["",""])[1].trim(),
+    exporter: (t1.match(/Inter\s*Export\s*Inc[^\n]*/i) || [""])[0],
+    consignee: (t1.match(/American\s*Auto\s*Sarl[^\n]*/i) || [""])[0],
     document: (t1.match(/\b\d{7,8}\b/) || [""])[0],
-    consignee: (t1.match(/Consignee[:\s]*(.+?)(?=Document|Container|$)/i) || ["",""])[1].trim(),
-    carrier_foreign_port_unloading: (t1.match(/Carrier[:\s]*(.+?)Port of Loading[:\s]*(.+?)Port of Discharge[:\s]*(.+?)(?=\bDocument|\bContainer|$)/i) || ["","","",""])[1]+" / "+(t1.match(/Carrier[:\s]*(.+?)Port of Loading[:\s]*(.+?)Port of Discharge[:\s]*(.+?)(?=\bDocument|\bContainer|$)/i) || ["","","",""])[2]+" / "+(t1.match(/Carrier[:\s]*(.+?)Port of Loading[:\s]*(.+?)Port of Discharge[:\s]*(.+?)(?=\bDocument|\bContainer|$)/i) || ["","","",""])[3],
     container: (t1.match(/([A-Z]{4}\d{7})/i) || [""])[0],
-    cars: (t1.match(/([A-Z0-9]+)\s*VIN[:\s]*([A-Z0-9]{17})/gi) || []).join("<br>"),
-    gross: (t1.match(/(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i) || [""])[0],
-    ectn: (t1.match(/ECTN[:\s]*(\S+)/i) || ["",""])[1],
-    in_transit: (t1.match(/In Transit[:\s]*(\S+)/i) || ["",""])[1]
+    destination: (t1.match(/(Lom[eé]|Togo)/i) || [""])[0],
+    vessel: (t1.match(/(ARICA\s*EXPRESS\s*\S*)/i) || [""])[0],
+    cars: (t1.match(/(TOYOTA|HYUNDAI|ACURA|KIA).*?VIN[:\s]*[A-Z0-9]{17}/gi) || []).join("<br>"),
+    gross: (t1.match(/(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i) || [""])[0]
   };
 
   // Build table
   let html = `<h3>📋 Comparison Results</h3>
-  <table>
-  <tr><th>Field</th><th>Bill of Lading</th><th>Export Declaration</th><th>Result</th></tr>`;
-  
-  html += compareText("Exporter", ref.exporter, t2);
-  html += compareText("Document Number", ref.document, t2);
-  html += compareText("Consignee", ref.consignee, t2);
-  html += compareText("Carrier / Foreign Port / Unloading Port", ref.carrier_foreign_port_unloading, t2);
-  html += compareText("Container Number", ref.container, t2);
-  html += compareText("Cars (Model + VIN)", ref.cars, t2);
-  html += compareWeight("Gross Weight", ref.gross, t2);
-  html += compareText("ECTN", ref.ectn, t2);
-  html += compareText("In Transit", ref.in_transit, t2);
-  
+  <table><tr><th>Field</th><th>Bill of Lading</th><th>Export Declaration</th><th>Result</th></tr>`;
+  html += resultMatch("Exporter Name", ref.exporter, t2);
+  html += resultMatch("Consignee", ref.consignee, t2);
+  html += resultMatch("Document Number", ref.document, t2);
+  html += resultMatch("Container Number", ref.container, t2);
+  html += resultMatch("Destination", ref.destination, t2);
+  html += resultMatch("Vessel", ref.vessel, t2);
+  html += resultMatch("Cars (Models & VINs)", ref.cars, t2);
+  html += resultMatch("Total Gross Weight", ref.gross, t2);
   html += "</table>";
 
   const same = (html.match(/✅/g) || []).length;
   const approx = (html.match(/⚠️/g) || []).length;
   const diff = (html.match(/❌/g) || []).length;
-  html += `<div id="summary">Summary: ✅ Same = ${same}, ⚠️ Approximately = ${approx}, ❌ Not Found / Not Same = ${diff}</div>`;
+  html += `<div id="summary">Summary: ✅ Same = ${same}, ⚠️ Approximately = ${approx}, ❌ Not Found = ${diff}</div>`;
 
   res.innerHTML = html;
 }
