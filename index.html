@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Shipping Comparison Tool (Fixed Extraction)</title>
+<title>Compare Export Declaration Using Bill of Lading as Reference</title>
 <style>
   body { font-family: Arial, sans-serif; margin: 30px; background: #fafafa; }
   h2 { color: #333; }
@@ -20,7 +20,7 @@
 </head>
 <body>
 
-<h2>📦 Compare Bill of Lading and Export Declaration</h2>
+<h2>📦 Compare Export Declaration (Using Bill of Lading as Reference)</h2>
 
 <label>Upload Bill of Lading (PDF):</label><br>
 <input type="file" id="pdf1" accept="application/pdf"><br>
@@ -46,97 +46,61 @@ async function extractText(file) {
   return text;
 }
 
-function normalize(t) { return t ? t.replace(/\s+/g, " ").trim().toLowerCase() : ""; }
+function normalize(t) { return t ? t.replace(/\s+/g, " ").trim() : ""; }
 
-function compareValues(label, v1, v2) {
-  const c1 = normalize(v1), c2 = normalize(v2);
-  let result = "❌ Not Same", cls = "diff";
-  if (!v1 && !v2) { result = "❌ Not Found"; cls = "diff"; }
-  else if (c1 === c2) { result = "✅ Same"; cls = "same"; }
-  else if (c1.includes(c2) || c2.includes(c1)) { result = "⚠️ Approximately"; cls = "approx"; }
-  return `<tr><td>${label}</td><td>${v1 || "-"}</td><td>${v2 || "-"}</td><td class="${cls}">${result}</td></tr>`;
+function resultMatch(label, refValue, declText) {
+  if (!refValue) return `<tr><td>${label}</td><td>-</td><td>-</td><td class='diff'>❌ Not Found</td></tr>`;
+  const val = refValue.toLowerCase();
+  const text = declText.toLowerCase();
+  let res = "❌ Not Found", cls = "diff";
+  if (text.includes(val)) { res = "✅ Same"; cls = "same"; }
+  else if (val.split(" ").filter(v => v.length > 3).some(v => text.includes(v))) { res = "⚠️ Approximately"; cls = "approx"; }
+  return `<tr><td>${label}</td><td>${refValue}</td><td>${res === '❌ Not Found' ? '-' : 'Found in Export Declaration'}</td><td class='${cls}'>${res}</td></tr>`;
 }
 
 async function comparePDFs() {
   const f1 = document.getElementById("pdf1").files[0];
   const f2 = document.getElementById("pdf2").files[0];
   const res = document.getElementById("result");
-  if (!f1 || !f2) { res.innerHTML = "<p style='color:red;'>⚠️ Please upload both files first.</p>"; return; }
+  if (!f1 || !f2) { res.innerHTML = "<p style='color:red;'>⚠️ Please upload both files.</p>"; return; }
+  res.innerHTML = "⏳ Reading and comparing...";
 
-  res.innerHTML = "<p>⏳ Reading and comparing files...</p>";
+  const [bolText, declText] = await Promise.all([extractText(f1), extractText(f2)]);
+  const t1 = bolText.replace(/\s+/g, " ");
+  const t2 = declText.replace(/\s+/g, " ");
 
-  const [t1, t2] = await Promise.all([extractText(f1), extractText(f2)]);
-
-  // Extract real data values with custom regex tailored for example PDFs
-  const get = (text, regex) => {
-    const m = text.match(regex);
-    return m ? (m[1] || m[0]).trim() : "";
+  // Extract values from Bill of Lading (Reference)
+  const ref = {
+    exporter: (t1.match(/Inter\s*Export\s*Inc[^\n]*/i) || [""])[0],
+    consignee: (t1.match(/American\s*Auto\s*Sarl[^\n]*/i) || [""])[0],
+    document: (t1.match(/\b\d{7,8}\b/) || [""])[0],
+    container: (t1.match(/([A-Z]{4}\d{7})/i) || [""])[0],
+    destination: (t1.match(/(Lom[eé]|Togo)/i) || [""])[0],
+    vessel: (t1.match(/(ARICA\s*EXPRESS\s*\S*)/i) || [""])[0],
+    cars: (t1.match(/(TOYOTA|HYUNDAI|ACURA|KIA).*?VIN[:\s]*[A-Z0-9]{17}/gi) || []).join("<br>"),
+    gross: (t1.match(/(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i) || [""])[0]
   };
 
-  const data = [
-    ["Exporter Name",
-      get(t1, /9288-5755\s*QUEBEC INC.*?(?=\d{3,}|$)/i), 
-      get(t2, /9288-5755\s*QUEBEC INC.*?(?=\d{3,}|$)/i)
-    ],
-    ["Consignee",
-      get(t1, /EAGLE.*?BENIN/i),
-      get(t2, /EAGLE.*?BENIN/i)
-    ],
-    ["Document Number",
-      get(t1, /Document Number\s*[:,]?\s*(\d+)/i),
-      get(t2, /Document Number\s*[:,]?\s*(\d+)/i)
-    ],
-    ["Destination",
-      get(t1, /Cotonou/i),
-      get(t2, /Cotonou/i)
-    ],
-    ["Vessel",
-      get(t1, /Hapag-Lloyd/i),
-      get(t2, /Hapag-Lloyd/i)
-    ],
-    ["Container Number",
-      get(t1, /CNT[:\s]*([A-Z0-9]+)/i),
-      get(t2, /CNT[:\s]*([A-Z0-9]+)/i)
-    ],
-    ["Total Weight",
-      get(t1, /(\d{1,3}(?:,\d{3})*\.?\d*)\s*Kg/i),
-      get(t2, /(\d{1,3}(?:,\d{3})*\.?\d*)\s*Kg/i)
-    ],
-    ["Transit Information",
-      get(t1, /IN TRANSIT TO [^.\n]+/i),
-      get(t2, /IN TRANSIT TO [^.\n]+/i)
-    ],
-    ["ECTN Number",
-      get(t1, /ECTN[:\s]*([A-Z0-9]+)/i),
-      get(t2, /ECTN[:\s]*([A-Z0-9]+)/i)
-    ],
-    ["CERS Number",
-      get(t1, /CERS[:\s]*([A-Z0-9]+)/i),
-      get(t2, /CERS[:\s]*([A-Z0-9]+)/i)
-    ],
-    ["Cars Models",
-      (t1.match(/(2009\sTOYOTA YARIS|2010\sTOYOTA MATRIX|2013\sMERCEDES-BENZ C-CLASS C250)/gi) || []).join(", "),
-      (t2.match(/(2009\sTOYOTA YARIS|2010\sTOYOTA MATRIX|2013\sMERCEDES-BENZ C-CLASS C250)/gi) || []).join(", ")
-    ],
-    ["VINs for Cars",
-      (t1.match(/VIN[:\s]?(\w+)/gi) || []).join(", "),
-      (t2.match(/VIN[:\s]?(\w+)/gi) || []).join(", ")
-    ]
-  ];
-
+  // Build table
   let html = `<h3>📋 Comparison Results</h3>
   <table><tr><th>Field</th><th>Bill of Lading</th><th>Export Declaration</th><th>Result</th></tr>`;
-  for (const [lbl, a, b] of data) html += compareValues(lbl, a, b);
+  html += resultMatch("Exporter Name", ref.exporter, t2);
+  html += resultMatch("Consignee", ref.consignee, t2);
+  html += resultMatch("Document Number", ref.document, t2);
+  html += resultMatch("Container Number", ref.container, t2);
+  html += resultMatch("Destination", ref.destination, t2);
+  html += resultMatch("Vessel", ref.vessel, t2);
+  html += resultMatch("Cars (Models & VINs)", ref.cars, t2);
+  html += resultMatch("Total Gross Weight", ref.gross, t2);
   html += "</table>";
 
   const same = (html.match(/✅/g) || []).length;
   const approx = (html.match(/⚠️/g) || []).length;
   const diff = (html.match(/❌/g) || []).length;
-  html += `<div id="summary">Summary: ✅ Same = ${same}, ⚠️ Approximately = ${approx}, ❌ Not Same = ${diff}</div>`;
+  html += `<div id="summary">Summary: ✅ Same = ${same}, ⚠️ Approximately = ${approx}, ❌ Not Found = ${diff}</div>`;
 
   res.innerHTML = html;
 }
 </script>
-
 </body>
 </html>
