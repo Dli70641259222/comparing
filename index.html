@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Compare 2 PDF Files</title>
+<style>
+  body { font-family: Arial; margin: 30px; }
+  input { margin: 10px 0; }
+  #result { margin-top: 20px; font-weight: bold; }
+  pre { background: #f3f3f3; padding: 10px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+
+<h2>Compare Two PDF Files</h2>
+
+<label>Upload first PDF:</label><br>
+<input type="file" id="pdf1" accept="application/pdf"><br>
+<label>Upload second PDF:</label><br>
+<input type="file" id="pdf2" accept="application/pdf"><br>
+
+<button onclick="comparePDFs()">Compare</button>
+
+<div id="result"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script>
+async function extractText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const strings = content.items.map(item => item.str);
+    text += strings.join(" ") + "\n";
+  }
+  return text;
+}
+
+async function comparePDFs() {
+  const file1 = document.getElementById("pdf1").files[0];
+  const file2 = document.getElementById("pdf2").files[0];
+  const resultDiv = document.getElementById("result");
+  
+  if (!file1 || !file2) {
+    resultDiv.textContent = "Please upload both PDF files.";
+    return;
+  }
+
+  resultDiv.textContent = "Reading and comparing files...";
+
+  const text1 = await extractText(file1);
+  const text2 = await extractText(file2);
+
+  if (text1.trim() === text2.trim()) {
+    resultDiv.innerHTML = "<span style='color:green'>✅ Both PDFs contain the same information.</span>";
+  } else {
+    resultDiv.innerHTML = "<span style='color:red'>❌ PDFs are different.</span><br><br>";
+    resultDiv.innerHTML += "<pre>Differences not identical, check manually.</pre>";
+  }
+}
+</script>
+</body>
+</html>
