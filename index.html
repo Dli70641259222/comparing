@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Compare 2 PDF Files (Bill of Lading)</title>
+<title>Compare Bill of Lading & Export Declaration</title>
 <style>
   body { font-family: Arial, sans-serif; margin: 30px; background: #fafafa; }
   h2 { color: #333; }
@@ -11,16 +11,17 @@
   th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
   th { background: #f0f0f0; }
   .same { color: green; font-weight: bold; }
+  .approx { color: orange; font-weight: bold; }
   .diff { color: red; font-weight: bold; }
 </style>
 </head>
 <body>
 
-<h2>Compare Two PDF Files (Bill of Lading)</h2>
+<h2>Compare Bill of Lading and Export Declaration</h2>
 
-<label>Upload first PDF:</label><br>
+<label>Upload Bill of Lading (PDF):</label><br>
 <input type="file" id="pdf1" accept="application/pdf"><br>
-<label>Upload second PDF:</label><br>
+<label>Upload Export Declaration (PDF):</label><br>
 <input type="file" id="pdf2" accept="application/pdf"><br>
 
 <button onclick="comparePDFs()">Compare</button>
@@ -42,22 +43,16 @@ async function extractText(file) {
   return text;
 }
 
-function extractField(text, patterns) {
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return match[1].trim();
-  }
-  return "";
-}
-
 function compareValues(label, v1, v2) {
-  const same = v1 && v2 && v1.toLowerCase() === v2.toLowerCase();
-  return `<tr>
-    <td>${label}</td>
-    <td>${v1 || "-"}</td>
-    <td>${v2 || "-"}</td>
-    <td class="${same ? 'same' : 'diff'}">${same ? '✅ Same' : '❌ Not Same'}</td>
-  </tr>`;
+  const clean = t => t ? t.replace(/\s+/g, " ").trim().toLowerCase() : "";
+  const c1 = clean(v1), c2 = clean(v2);
+  let status = "";
+  if (!c1 && !c2) status = "❌ Not Found";
+  else if (c1 === c2) status = "✅ Same";
+  else if (c1 && c2 && c1.includes(c2) || c2.includes(c1)) status = "⚠️ Approximately";
+  else status = "❌ Not Same";
+  const cls = status.includes("Same") ? "same" : status.includes("Approx") ? "approx" : "diff";
+  return `<tr><td>${label}</td><td>${v1 || "-"}</td><td>${v2 || "-"}</td><td class="${cls}">${status}</td></tr>`;
 }
 
 async function comparePDFs() {
@@ -70,59 +65,59 @@ async function comparePDFs() {
     return;
   }
 
-  resultDiv.innerHTML = "<p>Reading and comparing files...</p>";
+  resultDiv.innerHTML = "<p>Extracting and comparing text...</p>";
 
   const [text1, text2] = await Promise.all([extractText(file1), extractText(file2)]);
 
-  // Extract important fields
-  const fields = {
-    "Shipper": [/Inter Export.*?(\d{3,}.*?)(?=American|CIF|$)/i],
-    "Consignee": [/American Auto.*?Togo/i],
-    "Notify Party": [/CIF.*?(?:Laval|Terrebonne).*?(?=\s+[A-Z]{2}|$)/i],
-    "Booking/B.L Number": [/B\/L\s*No\.*[:\s]*([0-9A-Z]+)/i, /Proof of Report.*?([0-9A-Z]+)/i],
-    "Container Number": [/MTSU[0-9]+/i],
-    "Seal Number": [/SEAL[:\s]*([0-9]+)/i],
-    "Destination": [/(Lome|Togo)/i],
-    "Port of Loading": [/(Montreal|Montréal)/i],
-    "Vessel": [/(ARICA EXPRESS.*?19E41)/i],
-    "Gross Weight": /(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i,
-    "VINs": [/(JTDKTUD37CD524304|KM8JCCAE9PU234840|5J8TC2H68LL802650|3KPFU4DE6SE018704)/g],
-    "Date": [/October\s*\d{1,2}\s*,\s*2025/i],
-    "Freight": [/(\d+\s*CAD)/i],
+  // --- Define extraction patterns ---
+  const patterns = {
+    exporter_bol: /2\.\s*EXPORTER\s*(.*?)\s*3\./is,
+    exporter_exp: /Exporter Name.*?exportateur\s*(.*?)Are parties/i,
+    consignee_bol: /3\.\s*CONSIGNED TO\s*(.*?)\s*4\./is,
+    consignee_exp: /Consignee Name.*?destinataire\s*(.*?)Street Address/i,
+    doc_bol: /5\.\s*DOCUMENT NUMBER\s*(.*?)\s*(?:6\.|7\.|$)/i,
+    doc_exp: /Proof of Report.*?([A-Z0-9]+)/i,
+    container_bol: /(CNT[:\s]*[A-Z0-9]+)/i,
+    container_exp: /(Container Number.*?([A-Z0-9]+))/i,
+    dest_bol: /(Lome|Togo)/i,
+    dest_exp: /(Country of Final Destination.*?(Lome|Togo))/i,
+    vessel_bol: /(ARICA EXPRESS.*?19E41)/i,
+    vessel_exp: /(Vessel Name.*?ARICA EXPRESS.*?19E41)/i,
+    gross_bol: /(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i,
+    gross_exp: /Gross Weight.*?(\d{1,4,5,6,7,8,9,0]+)\s*Kilogramme/i,
+    vins_bol: /(VIN:[A-Z0-9]+)/g,
+    vins_exp: /(JTDKTUD37CD524304|KM8JCCAE9PU234840|5J8TC2H68LL802650|3KPFU4DE6SE018704)/g
   };
 
-  let html = `
-    <table>
-      <tr><th>Field</th><th>File 1</th><th>File 2</th><th>Result</th></tr>
-  `;
-
-  for (const [label, pattern] of Object.entries(fields)) {
-    let v1 = Array.isArray(pattern) ? "" : (text1.match(pattern) ? text1.match(pattern)[1] : "");
-    let v2 = Array.isArray(pattern) ? "" : (text2.match(pattern) ? text2.match(pattern)[1] : "");
-
-    if (Array.isArray(pattern)) {
-      for (let p of pattern) {
-        if (!v1) {
-          const m = text1.match(p);
-          if (m) v1 = m[1] || m[0];
-        }
-        if (!v2) {
-          const m = text2.match(p);
-          if (m) v2 = m[1] || m[0];
-        }
-      }
-    }
-
-    // Special case for VINs: show all matches joined
-    if (label === "VINs") {
-      v1 = (text1.match(pattern[0]) || []).join(", ");
-      v2 = (text2.match(pattern[0]) || []).join(", ");
-    }
-
-    html += compareValues(label, v1, v2);
+  // --- Extract field values ---
+  function getMatch(text, regex) {
+    if (!regex) return "";
+    const match = text.match(regex);
+    return match ? match[1] || match[0] : "";
   }
 
+  const results = [
+    ["Exporter", getMatch(text1, patterns.exporter_bol), getMatch(text2, patterns.exporter_exp)],
+    ["Consignee", getMatch(text1, patterns.consignee_bol), getMatch(text2, patterns.consignee_exp)],
+    ["Document Number", getMatch(text1, patterns.doc_bol), getMatch(text2, patterns.doc_exp)],
+    ["Container Number", getMatch(text1, patterns.container_bol), getMatch(text2, patterns.container_exp)],
+    ["Destination", getMatch(text1, patterns.dest_bol), getMatch(text2, patterns.dest_exp)],
+    ["Vessel", getMatch(text1, patterns.vessel_bol), getMatch(text2, patterns.vessel_exp)],
+    ["Cars & VINs", 
+      (text1.match(patterns.vins_bol) || []).join(", "),
+      (text2.match(patterns.vins_exp) || []).join(", ")
+    ],
+    ["Total Gross Weight", getMatch(text1, patterns.gross_bol), getMatch(text2, patterns.gross_exp)]
+  ];
+
+  // --- Build HTML table ---
+  let html = `
+    <table>
+      <tr><th>Field</th><th>Bill of Lading</th><th>Export Declaration</th><th>Result</th></tr>
+  `;
+  for (const [label, v1, v2] of results) html += compareValues(label, v1, v2);
   html += "</table>";
+
   resultDiv.innerHTML = html;
 }
 </script>
