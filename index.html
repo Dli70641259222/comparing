@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Shipping Comparison Tool (Fixed Extraction)</title>
+<title>Compare Bill of Lading & Export Declaration (Smart)</title>
 <style>
   body { font-family: Arial, sans-serif; margin: 30px; background: #fafafa; }
   h2 { color: #333; }
@@ -54,6 +54,7 @@ function compareValues(label, v1, v2) {
   if (!v1 && !v2) { result = "❌ Not Found"; cls = "diff"; }
   else if (c1 === c2) { result = "✅ Same"; cls = "same"; }
   else if (c1.includes(c2) || c2.includes(c1)) { result = "⚠️ Approximately"; cls = "approx"; }
+  else if (Math.abs(parseFloat(v1) - parseFloat(v2)) < 1) { result = "⚠️ Approximately"; cls = "approx"; }
   return `<tr><td>${label}</td><td>${v1 || "-"}</td><td>${v2 || "-"}</td><td class="${cls}">${result}</td></tr>`;
 }
 
@@ -67,44 +68,44 @@ async function comparePDFs() {
 
   const [t1, t2] = await Promise.all([extractText(f1), extractText(f2)]);
 
-  // Extract real data values
-  const get = (text, regex) => {
-    const m = text.match(regex);
+  const get = (text, re) => {
+    const m = text.match(re);
     return m ? m[1] || m[0] : "";
   };
 
+  // Better, flexible extraction patterns
   const data = [
     ["Exporter Name",
-      get(t1, /(Inter\s*Export\s*Inc[^\n]*)/i),
-      get(t2, /(INTER\s*EXPORT\s*INC[^\n]*)/i)
+      get(t1, /(Inter\s*Export\s*Inc.*?(?=\s{2,}|American|CIF))/i),
+      get(t2, /(INTER\s*EXPORT\s*INC.*?(?=\s{2,}|Québec|Canada))/i)
     ],
     ["Consignee",
-      get(t1, /(American\s*Auto\s*Sarl\s*U[^\n]*)/i),
-      get(t2, /(American\s*Auto\s*Sarl\s*U[^\n]*)/i)
+      get(t1, /(American\s*Auto\s*Sarl.*?(?=\s{2,}|CIF|Lome|Togo))/i),
+      get(t2, /(American\s*Auto\s*Sarl.*?(?=\s{2,}|FAST|Togo))/i)
     ],
     ["Document Number",
-      get(t1, /(\b\d{7,8}\b)/), // usually B/L number
-      get(t2, /(\b\d{7,8}\b)/)
+      get(t1, /\b\d{7,8}\b/),
+      get(t2, /\b\d{7,8}\b/)
     ],
     ["Container Number",
-      get(t1, /(CNT[:\s]*[A-Z]{4}\d{7})/i),
+      get(t1, /([A-Z]{4}\d{7})/i),
       get(t2, /([A-Z]{4}\d{7})/i)
     ],
     ["Destination",
-      get(t1, /(Lome|Togo)/i),
-      get(t2, /(Lome|Togo)/i)
+      get(t1, /(Lom[eé]|Togo)/i),
+      get(t2, /(Lom[eé]|Togo)/i)
     ],
     ["Vessel",
       get(t1, /(ARICA\s*EXPRESS\s*\S*)/i),
       get(t2, /(ARICA\s*EXPRESS\s*\S*)/i)
     ],
     ["Cars (Models & VINs)",
-      (t1.match(/(TOYOTA|HYUNDAI|ACURA|KIA)[^V]*VIN[:\s]*[A-Z0-9]+/gi) || []).join("<br>"),
-      (t2.match(/(TOYOTA|HYUNDAI|ACURA|KIA)[^A-Z0-9]*[A-Z0-9]{17}/gi) || []).join("<br>")
+      (t1.match(/([A-Z0-9 ]{3,25})\s+VIN[:\s]*([A-Z0-9]{17})/gi) || []).join("<br>"),
+      (t2.match(/([A-Z0-9 ]{3,25})\s+([A-Z0-9]{17})/gi) || []).join("<br>")
     ],
     ["Total Gross Weight",
       get(t1, /(\d{1,3}(?:,\d{3})*\.\d{1,2})\s*Kg/i),
-      get(t2, /(\d{3,5,6,7,8,9,0]+)\s*Kilogramme/i)
+      get(t2, /(\d{3,6})\s*(Kilogramme|Kg)/i)
     ]
   ];
 
